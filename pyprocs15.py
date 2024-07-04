@@ -11,7 +11,7 @@ class PyProCS15:
         
         self.structure = self._get_structure_object(structure_file)
         
-        self._add_attributes_to_biopdb_instances()
+        self._prepare()
         print(self.all_residues)
 
     def _get_structure_object(self, filename):
@@ -30,8 +30,8 @@ class PyProCS15:
         
         return parser.get_structure(filename, filename)
         
-    def _add_attributes_to_biopdb_instances(self):
-
+    def _prepare(self):
+        #add attributes for chemical shift calculation to Bio.PDB.Residue
         
         self.all_residues = []
         for model in self.structure:
@@ -84,7 +84,30 @@ class PyProCS15:
         pass
     
     def _calc_dihedral_angles_of_a_residue(self, target):
-        
+        # see http://www.mlb.co.jp/linux/science/garlic/doc/commands/dihedrals.html
+        CHI_ATOMS = {\
+                    'GLY': [],
+                    'ALA': [],
+                    'ASP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
+                    'GLU': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
+                    'HIS': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'ND1']],
+                    'THR': [['N', 'CA', 'CB', 'OG1']],
+                    'SER': [['N', 'CA', 'CB', 'OG']],
+                    'CYS': [['N', 'CA', 'CB', 'SG']],
+                    'ILE': [['N', 'CA', 'CB', 'CG1'], ['CA', 'CB', 'CG1', 'CD']],
+                    'LEU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                    'ASN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
+                    'TYR': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                    'PHE': [['N', 'CA', 'CB',' CG'], ['CA', 'CB', 'CG', 'CD1']],
+                    'PRO': [],
+                    'TRP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                    'LYS': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'CE'], ['CG', 'CD', 'CE', 'NZ']],
+                    'ARG': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'NE'], ['CG', 'CD', 'NE', 'CZ']],
+                    'GLN': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
+                    'MET': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'SD'], ['CB', 'CG', 'SD', 'CE']],
+                    'VAL': [['CG1', 'CA', 'CB', 'CG2']], #Special case
+                    }
+
         model_id, chain_id, resid = target
         
         res_cur = self.structure[model_id][chain_id][resid]
@@ -129,8 +152,23 @@ class PyProCS15:
             pass
         except Exception as e:
             raise e
-            
-        pass
+        
+        resname = res_cur.get_resname()
+
+        chi_atoms = CHI_ATOMS[resname]
+
+        if len(chi_atoms) == 0:
+            return
+        
+        if resname == 'VAL':
+
+            cg1cg2 = Bio.PDB.vectors.calc_dihedral( *(tuple(map(lambda a:res_cur[a].get_vector(), chi_atoms[0]) )) )
+            if cg1cg2 > 0:
+                chi_atoms = [['N', 'CA', 'CB', 'CG1']]
+            else:
+                chi_atoms = [['N', 'CA', 'CB', 'CG2']]
+
+        res_cur.chi = [ np.rad2deg( Bio.PDB.vectors.calc_dihedral( *(tuple(map(lambda a:res_cur[a].get_vector(), atoms) ) ) ) ) for atoms in chi_atoms]            
         
     class _RingCurrentDonor:
         
