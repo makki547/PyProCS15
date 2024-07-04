@@ -1,5 +1,6 @@
 import numpy as np
 import Bio.PDB
+import Bio.PDB.vectors
 
 AROMATIC_RESIDUES = ['HIS', 'PHE', 'TRP', 'TYR']
 
@@ -11,7 +12,7 @@ class PyProCS15:
         self.structure = self._get_structure_object(structure_file)
         
         self._add_attributes_to_biopdb_instances()
-
+        print(self.all_residues)
 
     def _get_structure_object(self, filename):
         
@@ -30,26 +31,38 @@ class PyProCS15:
         return parser.get_structure(filename, filename)
         
     def _add_attributes_to_biopdb_instances(self):
+
         
-        
+        self.all_residues = []
         for model in self.structure:
             
+            model_id = model.get_id()
             for chain in model:
                 
+                chain_id = chain.get_id()
                 for residue in chain:
+                    
+                    hetflag, resid, _ = residue.get_id()
+                    print(hetflag)
+                    if hetflag != ' ':
+                        residue.hetatm = True
+                        continue
+                    
+                    self.all_residues.append( (model_id, chain_id, resid) )
                     
                     resname = residue.get_resname()
                                         
+                    residue.hetatm = False
                     residue.phi = None
                     residue.psi = None
                     
                     residue.chi = []
                     
-                    residue.hb_nho_hn = [] #for amide hydrogen bond, case 1
-                    residue.hb_nho_co = [] #for amide hydrogen bond, case 2
+                    residue.hb_nho_hn = [] #for amide hydrogen bond, primary
+                    residue.hb_nho_co = [] #for amide hydrogen bond, secondary
                     
-                    residue.hb_cahao_ha = [] #for Halpha hydrogen bond, case 1
-                    residue.hb_cahao_co = [] #for Halpha hydrogen bond, case 2
+                    residue.hb_cahao_ha = [] #for Halpha hydrogen bond, primary
+                    residue.hb_cahao_co = [] #for Halpha hydrogen bond, secondary
                     
                     residue.ring_current_doners = []
                     
@@ -58,9 +71,66 @@ class PyProCS15:
                     else:
                         residue.ring_current_donor = None
                     
-                    
-
-                
+    def calc_shieldings(self, targets = None):
+        
+        if targets is None:
+            targets = self.all_residues
+            
+        for target in targets:
+            self._calc_dihedral_angles_of_a_residue(target)
+            model_id, chain_id, resid = target
+            print(self.structure[model_id][chain_id][resid].phi)
+        
+        pass
+    
+    def _calc_dihedral_angles_of_a_residue(self, target):
+        
+        model_id, chain_id, resid = target
+        
+        res_cur = self.structure[model_id][chain_id][resid]
+        
+        
+        if res_cur.hetatm:
+            return
+        
+        
+        try:
+            res_pre = self.structure[model_id][chain_id][resid - 1]
+            if res_pre.hetatm:
+                raise KeyError
+            
+            res_cur.phi = np.rad2deg( 
+                                     Bio.PDB.vectors.calc_dihedral(
+                                         res_pre['C'].get_vector(),
+                                         res_cur['N'].get_vector(),
+                                         res_cur['CA'].get_vector(),
+                                         res_cur['C'].get_vector()
+                                         )
+                                     )
+        except KeyError:
+            pass
+        except Exception as e:
+            raise e
+        
+        try:
+            res_pro = self.structure[model_id][chain_id][resid + 1]
+            if res_pro.hetatm:
+                raise KeyError
+            
+            res_cur.psi = np.rad2deg( 
+                                     Bio.PDB.vectors.calc_dihedral(
+                                         res_cur['N'].get_vector(),
+                                         res_cur['CA'].get_vector(),
+                                         res_cur['C'].get_vector(),
+                                         res_pro['N'].get_vector()
+                                         )
+                                     )
+        except KeyError:
+            pass
+        except Exception as e:
+            raise e
+            
+        pass
         
     class _RingCurrentDonor:
         
@@ -78,7 +148,7 @@ class PyProCS15:
             self.ring_coms = self._get_ring_coms()
             self.ring_normal_vectors = self._get_normal_vectors()
             
-            self.intensities = BFACTOR * np.array(INTENSITIES[self.resname]).T
+            self.intensities = BFACTOR * np.array(INTENSITIES[self.resname])
             
             
         def _get_ring_atoms(self):
@@ -119,6 +189,18 @@ class PyProCS15:
                 norm_vecs[i,:] = nv / np.linalg.norm(nv)
                 
             return norm_vecs
+        
+        def get_shielding(self, atom):
+            
+            atom_vec = np.array(atom.get_coord()) - self.ring_coms
+            
+            dist = np.linalg.norm(atom_vec)
+            cos_term = np.sum(atom_vec * self.ring_normal_vectors, axis = -1)/dist
+            
+            return np.sum(self.intensities * (1 - 3*cos_term**2)/dist**3)
+            
+            
+            
             
 
             
@@ -139,4 +221,5 @@ class InvalidFileTypeException(Exception):
 if __name__ == '__main__':
     
     pyprocs15 = PyProCS15('1e12.cif')
-
+    pyprocs15.calc_shieldings()
+    
