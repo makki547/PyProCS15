@@ -1,6 +1,8 @@
+import sys
 import numpy as np
 import Bio.PDB
 import Bio.PDB.vectors
+from enum import Enum, auto
 
 AROMATIC_RESIDUES = ['HIS', 'PHE', 'TRP', 'TYR']
 
@@ -10,9 +12,9 @@ class PyProCS15:
         
         
         self.structure = self._get_structure_object(structure_file)
-        
+
         self._prepare()
-        print(self.all_residues)
+        
 
     def _get_structure_object(self, filename):
         
@@ -31,8 +33,8 @@ class PyProCS15:
         return parser.get_structure(filename, filename)
         
     def _prepare(self):
-        #add attributes for chemical shift calculation to Bio.PDB.Residue
         
+        #add attributes for chemical shift calculation to Bio.PDB.Residue
         self.all_residues = []
         for model in self.structure:
             
@@ -42,34 +44,69 @@ class PyProCS15:
                 chain_id = chain.get_id()
                 for residue in chain:
                     
+                    
                     hetflag, resid, _ = residue.get_id()
-                    print(hetflag)
-                    if hetflag != ' ':
+                    if hetflag.strip() != '':
                         residue.hetatm = True
                         continue
                     
                     self.all_residues.append( (model_id, chain_id, resid) )
                     
                     resname = residue.get_resname()
+                    
+                    if resname == 'HID' or resname == 'HIE':
+                        residue.resname = resname = 'HIS'
+                        
+                    
+                    try:
+                        residue.next = self.structure[model_id][chain_id][resid + 1]
+                    except KeyError:
+                        residue.next = None
+                    except Exception as e:
+                        raise e
+                    
+                    try:
+                        residue.prev = self.structure[model_id][chain_id][resid - 1]
+                    except KeyError:
+                        residue.prev = None
+                    except Exception as e:
+                        raise e
+                    
                                         
                     residue.hetatm = False
-                    residue.phi = None
-                    residue.psi = None
+        
+        
+        #collect molecular properties for chemical shift calculation    
+        for model in self.structure:
+            
+            model_id = model.get_id()
+            for chain in model:
+                
+                chain_id = chain.get_id()
+                for residue in chain:
                     
-                    residue.chi = []
+                    if residue.hetatm: continue
                     
-                    residue.hb_nho_hn = [] #for amide hydrogen bond, primary
-                    residue.hb_nho_co = [] #for amide hydrogen bond, secondary
+                    resname = residue.get_resname()
                     
-                    residue.hb_cahao_ha = [] #for Halpha hydrogen bond, primary
-                    residue.hb_cahao_co = [] #for Halpha hydrogen bond, secondary
+                    residue.dihedral_contribution = self._Dihedral_contribution(residue)
                     
-                    residue.ring_current_doners = []
+                    try:
+                        residue.dihedral_contribution.calc_dihedral_angles()    
+                    except AtomMissingException:
+                        print(f'Atom not found in {resid}-th residue, this and the adjacent residues will be ignored', file = sys.stderr)
+                    
+                    
+                    residue.hydrogen_bonds = self._Hydrogen_bond(residue)
+           
                     
                     if resname in AROMATIC_RESIDUES:
                         residue.ring_current_donor = self._RingCurrentDonor(residue)
                     else:
                         residue.ring_current_donor = None
+                        
+                    
+                    
                     
     def calc_shieldings(self, targets = None):
         
@@ -77,98 +114,128 @@ class PyProCS15:
             targets = self.all_residues
             
         for target in targets:
-            self._calc_dihedral_angles_of_a_residue(target)
+            
+            
             model_id, chain_id, resid = target
-            print(self.structure[model_id][chain_id][resid].phi)
+            print(self.structure[model_id][chain_id][resid].dihedral_contribution.chi)
         
         pass
     
-    def _calc_dihedral_angles_of_a_residue(self, target):
-        # see http://www.mlb.co.jp/linux/science/garlic/doc/commands/dihedrals.html
-        CHI_ATOMS = {\
-                    'GLY': [],
-                    'ALA': [],
-                    'ASP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
-                    'GLU': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
-                    'HIS': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'ND1']],
-                    'THR': [['N', 'CA', 'CB', 'OG1']],
-                    'SER': [['N', 'CA', 'CB', 'OG']],
-                    'CYS': [['N', 'CA', 'CB', 'SG']],
-                    'ILE': [['N', 'CA', 'CB', 'CG1'], ['CA', 'CB', 'CG1', 'CD']],
-                    'LEU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
-                    'ASN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
-                    'TYR': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
-                    'PHE': [['N', 'CA', 'CB',' CG'], ['CA', 'CB', 'CG', 'CD1']],
-                    'PRO': [],
-                    'TRP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
-                    'LYS': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'CE'], ['CG', 'CD', 'CE', 'NZ']],
-                    'ARG': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'NE'], ['CG', 'CD', 'NE', 'CZ']],
-                    'GLN': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
-                    'MET': [['N', 'CA', 'CB',' CG'], ['CA', 'CB',' CG', 'SD'], ['CB', 'CG', 'SD', 'CE']],
-                    'VAL': [['CG1', 'CA', 'CB', 'CG2']], #Special case
-                    }
-
-        model_id, chain_id, resid = target
+    class _Dihedral_contribution:
         
-        res_cur = self.structure[model_id][chain_id][resid]
-        
-        
-        if res_cur.hetatm:
-            return
-        
-        
-        try:
-            res_pre = self.structure[model_id][chain_id][resid - 1]
-            if res_pre.hetatm:
-                raise KeyError
+        def __init__(self, residue):
+            self.phi = 0.0
+            self.psi = 0.0
+            self.chi = []
+            self.ignoring = False
+            self.residue = residue
+            self.resname = residue.get_resname()
             
-            res_cur.phi = np.rad2deg( 
-                                     Bio.PDB.vectors.calc_dihedral(
-                                         res_pre['C'].get_vector(),
-                                         res_cur['N'].get_vector(),
-                                         res_cur['CA'].get_vector(),
-                                         res_cur['C'].get_vector()
-                                         )
-                                     )
-        except KeyError:
-            pass
-        except Exception as e:
-            raise e
-        
-        try:
-            res_pro = self.structure[model_id][chain_id][resid + 1]
-            if res_pro.hetatm:
-                raise KeyError
             
-            res_cur.psi = np.rad2deg( 
-                                     Bio.PDB.vectors.calc_dihedral(
-                                         res_cur['N'].get_vector(),
-                                         res_cur['CA'].get_vector(),
-                                         res_cur['C'].get_vector(),
-                                         res_pro['N'].get_vector()
-                                         )
-                                     )
-        except KeyError:
-            pass
-        except Exception as e:
-            raise e
-        
-        resname = res_cur.get_resname()
+            
+    
+        def calc_dihedral_angles(self):
+            # see http://www.mlb.co.jp/linux/science/garlic/doc/commands/dihedrals.html
+            CHI_ATOMS = {\
+                        'GLY': [],
+                        'ALA': [],
+                        'ASP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
+                        'GLU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
+                        'HIS': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'ND1']],
+                        'THR': [['N', 'CA', 'CB', 'OG1']],
+                        'SER': [['N', 'CA', 'CB', 'OG']],
+                        'CYS': [['N', 'CA', 'CB', 'SG']],
+                        'ILE': [['N', 'CA', 'CB', 'CG1'], ['CA', 'CB', 'CG1', 'CD']],
+                        'LEU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                        'ASN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
+                        'TYR': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                        'PHE': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                        'PRO': [],
+                        'TRP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                        'LYS': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'CE'], ['CG', 'CD', 'CE', 'NZ']],
+                        'ARG': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'NE'], ['CG', 'CD', 'NE', 'CZ']],
+                        'GLN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
+                        'MET': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'SD'], ['CB', 'CG', 'SD', 'CE']],
+                        'VAL': [['CG1', 'CA', 'CB', 'CG2']], #Special case
+                        }
 
-        chi_atoms = CHI_ATOMS[resname]
+            
+            
+            
+            
+            
+            if self.residue.hetatm:
+                return
+            
+            res_cur = self.residue
+            
+            try:
+                res_pre = self.residue.prev
+                
+                if res_pre is None:
+                    raise KeyError
+                
+                if res_pre.hetatm:
+                    raise KeyError
+                
+                res_cur.phi = np.rad2deg( 
+                                        Bio.PDB.vectors.calc_dihedral(
+                                            res_pre['C'].get_vector(),
+                                            res_cur['N'].get_vector(),
+                                            res_cur['CA'].get_vector(),
+                                            res_cur['C'].get_vector()
+                                            )
+                                        )
+            except KeyError:
+                self.ignoring = True
+                raise AtomMissingException()
+            except Exception as e:
+                raise e
+            
+            try:
+                res_pro = self.residue.next
+                if res_pro is None:
+                    raise KeyError
+                
+                if res_pro.hetatm:
+                    raise KeyError
+                
+                res_cur.psi = np.rad2deg( 
+                                        Bio.PDB.vectors.calc_dihedral(
+                                            res_cur['N'].get_vector(),
+                                            res_cur['CA'].get_vector(),
+                                            res_cur['C'].get_vector(),
+                                            res_pro['N'].get_vector()
+                                            )
+                                        )
+            except KeyError:
+                self.ignoring = True
+                raise AtomMissingException()
+            except Exception as e:
+                raise e
+            
+            
+            chi_atoms = CHI_ATOMS[self.resname]
 
-        if len(chi_atoms) == 0:
-            return
-        
-        if resname == 'VAL':
+            if len(chi_atoms) == 0:
+                return
+            
+            try:
+                if self.resname == 'VAL':
 
-            cg1cg2 = Bio.PDB.vectors.calc_dihedral( *(tuple(map(lambda a:res_cur[a].get_vector(), chi_atoms[0]) )) )
-            if cg1cg2 > 0:
-                chi_atoms = [['N', 'CA', 'CB', 'CG1']]
-            else:
-                chi_atoms = [['N', 'CA', 'CB', 'CG2']]
+                    cg1cg2 = Bio.PDB.vectors.calc_dihedral( *tuple(map(lambda a:res_cur[a].get_vector(), chi_atoms[0]) ) )
+                    if cg1cg2 > 0:
+                        chi_atoms = [['N', 'CA', 'CB', 'CG1']]
+                    else:
+                        chi_atoms = [['N', 'CA', 'CB', 'CG2']]
 
-        res_cur.chi = [ np.rad2deg( Bio.PDB.vectors.calc_dihedral( *(tuple(map(lambda a:res_cur[a].get_vector(), atoms) ) ) ) ) for atoms in chi_atoms]            
+                self.chi = [ np.rad2deg( Bio.PDB.vectors.calc_dihedral( *tuple(map(lambda a:res_cur[a].get_vector(), atoms)  ) ) ) for atoms in chi_atoms]
+            except KeyError:
+                self.ignoring = True
+                raise AtomMissingException()
+            except Exception as e:
+                raise e
+            
         
     class _RingCurrentDonor:
         
@@ -239,10 +306,117 @@ class PyProCS15:
             
             
             
-            
-
-            
+    class _Hydrogen_bond:
         
+        class DonorType(Enum):
+            Ammonium = auto()
+            Amide = auto()
+            AlphaHydrogen = auto()
+            Indole = auto()
+            Guanidinium = auto()
+            
+        class AcceptorType(Enum):
+            Carboxylate = auto()
+            Alcohol = auto()
+            Amide = auto()
+        
+        def __init__(self, residue):
+            
+            self.donors = [] # list of tuples, tuples should be like (Hydrogen atom obj, second atom obj, DonorType)
+            self.acceptors = [] # list of tuples, tuples should be like (Oxygen atom obj, second atom obj, third atom obj, AcceptorType)
+            
+            self._add_donors(residue)
+            self._add_acceptors(residue)
+            
+            pass
+            
+        def _add_donor_atoms(self, destination, first_residue,  first_atom_names,  second_residue, second_atom_names, hb_type):
+            
+            try:
+                if type(first_atom_names) is list and type(second_atom_names) is list:
+                    destination += [(first_residue[first_atom], second_residue[second_atom], hb_type) for first_atom, second_atom in zip(first_atom_names, second_atom_names)]
+                elif type(first_atom_names) is list:
+                    destination += [(first_residue[atom], second_residue[second_atom_names], hb_type) for atom in first_atom_names]
+                else:
+                    destination.append( (first_residue[first_atom_names], second_residue[second_atom_names], hb_type) )
+                    
+            except KeyError:
+                print(f'!!Warning!! Hydrogen not found, {first_residue} {second_residue}', file = sys.stderr)
+            except Exception as e:
+                raise e
+            
+        def _add_acceptor_atoms(self, destination, first_residue,  first_atom_names,  second_residue, second_atom_names, third_residue, third_atom_names, hb_type):
+            
+            try:
+                if type(first_atom_names) is list and type(third_atom_names) is list:
+                    destination += [(first_residue[first_atom], second_residue[second_atom_names], third_residue[third_atom], hb_type) for first_atom, third_atom in zip(first_atom_names, third_atom_names)]
+                elif type(first_atom_names) is list:
+                    destination += [(first_residue[atom], second_residue[second_atom_names], third_residue[third_atom_names], hb_type) for atom in first_atom_names]
+                else:
+                    destination.append( (first_residue[first_atom_names], second_residue[second_atom_names], third_residue[third_atom_names], hb_type) )
+                    
+            except KeyError:
+                print('!!Warning!! Oxygen not found', file = sys.stderr)
+            except Exception as e:
+                raise e
+            
+        def _add_donors(self, residue):
+            
+            resname = residue.get_resname()
+            
+            if 'H1' in residue:
+                self._add_donor_atoms(self.donors, residue, [f'H{i}' for i in range(1, 4)], residue, 'N', self.DonorType.Ammonium)
+            elif resname != 'PRO':
+                self._add_donor_atoms(self.donors, residue, 'H', residue, 'N', self.DonorType.Amide)
+                
+            if resname == 'GLY':
+                self._add_donor_atoms(self.donors, residue, [f'HA{i}' for i in range(2, 4)], residue, 'CA', self.DonorType.Amide)
+            else:
+                self._add_donor_atoms(self.donors, residue, 'HA', residue, 'CA', self.DonorType.Amide)
+                
+            
+            if resname == 'ASN':
+                self._add_donor_atoms(self.donors, residue, [f'HD2{i}' for i in range(1, 3)], residue, 'ND2', self.DonorType.Amide)
+            elif resname == 'GLN':
+                self._add_donor_atoms(self.donors, residue, [f'HE2{i}' for i in range(1, 3)], residue, 'NE2', self.DonorType.Amide)
+            elif resname == 'HIS':
+                if 'HD1' in residue:
+                    self._add_donor_atoms(self.donors, residue, 'HD1', residue, 'ND1', self.DonorType.Indole)
+                if 'HE2' in residue:
+                    self._add_donor_atoms(self.donors, residue, 'HE2', residue, 'NE2', self.DonorType.Indole)
+            elif resname == 'TRP':
+                self._add_donor_atoms(self.donors, residue, 'HE1', residue, 'NE1', self.DonorType.Indole)
+            elif resname == 'LYS':
+                self._add_donor_atoms(self.donors, residue, [f'HZ{i}' for i in range(1, 3)], residue, 'NZ', self.DonorType.Ammonium)
+            elif resname == 'ARG':
+                self._add_donor_atoms(self.donors, residue, ['HH11', 'HH12', 'HH21', 'HH22', 'HE'], residue, ['NH1', 'NH1', 'NH2', 'NH2', 'NE'], self.DonorType.Guanidinium)
+                
+        def _add_acceptors(self, residue):
+            
+            resname = residue.get_resname()
+            
+            if 'OXT' in residue:
+                self._add_acceptor_atoms(self.acceptors, residue, ['O', 'OXT'], residue, 'C', residue, ['OXT', 'O'], self.AcceptorType.Carboxylate)
+            else:
+                if residue.next is not None:
+                    self._add_acceptor_atoms(self.acceptors, residue, 'O', residue, 'C', residue.next, 'N', self.AcceptorType.Amide)
+                    
+            if resname == 'SER':
+                self._add_acceptor_atoms(self.acceptors, residue, 'OG', residue, 'CB', residue, 'HG', self.AcceptorType.Alcohol)
+            elif resname == 'THR': 
+                self._add_acceptor_atoms(self.acceptors, residue, 'OG1', residue, 'CB', residue, 'HG1', self.AcceptorType.Alcohol)
+            elif resname == 'TYR':
+                self._add_acceptor_atoms(self.acceptors, residue, 'OH', residue, 'CZ', residue, 'HH', self.AcceptorType.Alcohol)
+            elif resname == 'ASN':
+                self._add_acceptor_atoms(self.acceptors, residue, 'OD1', residue, 'CG', residue, 'ND2', self.AcceptorType.Amide)
+            elif resname == 'GLN':
+                self._add_acceptor_atoms(self.acceptors, residue, 'OE1', residue, 'CD', residue, 'NE2', self.AcceptorType.Amide)
+            elif resname == 'ASP':
+                self._add_acceptor_atoms(self.acceptors, residue, ['OD1', 'OD2'], residue, 'CG', residue, 'CB', self.AcceptorType.Carboxylate)
+            elif resname == 'GLU':
+                self._add_acceptor_atoms(self.acceptors, residue, ['OE1', 'OE2'], residue, 'CD', residue, 'CG', self.AcceptorType.Carboxylate)
+            pass
+                
 class InvalidFileTypeException(Exception):
     
     def __init__(self, arg = ''):
@@ -256,8 +430,21 @@ class InvalidFileTypeException(Exception):
             return f'{self.arg} is not PDB or mmCIF file. Use PDB or mmCIF file.'
 
 
+
+class AtomMissingException(Exception):
+    
+    def __init__(self, arg = ''):
+        self.arg = arg
+        
+    def __str__(self):
+        
+        if self.arg == '':
+            return 'Some atoms are missing.'
+        else:
+            return self.arg
+
 if __name__ == '__main__':
     
-    pyprocs15 = PyProCS15('1e12.cif')
+    pyprocs15 = PyProCS15('1UBQ_amber.pdb')
     pyprocs15.calc_shieldings()
     
