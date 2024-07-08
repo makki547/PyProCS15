@@ -9,6 +9,22 @@ from pathlib import Path
 
 AROMATIC_RESIDUES = ['HIS', 'PHE', 'TRP', 'TYR']
 
+
+class HBDonorType(Enum):
+            
+    Ammonium = auto()
+    Amide = auto()
+    AlphaHydrogen = auto()
+    Indole = auto()
+    Guanidinium = auto()
+
+class HBAcceptorType(Enum):
+    Carboxylate = auto()
+    Alcohol = auto()
+    Amide = auto()
+
+DIHEDRAL_CONTRIBUTION_ORDERS = [('CA', 'ca'), ('CB', 'cb'), ('C', 'co'), ('N', 'nh'), ('H', 'hn'), ('HA', 'ha')]
+
 class PyProCS15:
     
     def __init__(self, structure_file, procs_param_file_dir = None):
@@ -22,14 +38,15 @@ class PyProCS15:
         if self.procs_param_file_dir is None:
             raise ProCS15ParameterFileException()
         
-        self.procs_dataset = self.ProCS15_dataset(self.procs_param_file_dir)
+        self.procs_dataset = self._ProCS15_dataset(self.procs_param_file_dir)
+        
         
         
         
         self.structure = self._get_structure_object(structure_file)
 
         self._prepare()
-        
+        print(self.procs_dataset.hbond_dataset[HBAcceptorType.Carboxylate]['ca']([100, -3000, -3000]))
         
 
     def _get_structure_object(self, filename):
@@ -133,11 +150,13 @@ class PyProCS15:
             
             
             model_id, chain_id, resid = target
-            print(self.structure[model_id][chain_id][resid].dihedral_contribution.chi)
+            print(target)
+            print(self.structure[model_id][chain_id][resid].dihedral_contribution.get_contribution(self.procs_dataset))
+            #print(self.structure[model_id][chain_id][resid].dihedral_contribution.chi)
         
         pass
     
-    class ProCS15_dataset:
+    class _ProCS15_dataset:
         
         class InterpolationType(Enum):
             Cubic = auto()
@@ -172,8 +191,22 @@ class PyProCS15:
         
         DIHEDRAL_DATASET_NAMES = [(f'{aa}_{atom}.npy', itp_type)  for aa, itp_type in AMINO_ACIDS for atom in ['ca', 'cb', 'co', 'nh', 'hn', 'ha']]
         
-        HBOND_DATASET_NAMES = [('carbonyl', 'delta_hbond_251_91_361_12.npy'), ('alcohol', 'delta_hbond_Alcohol_251_91_361_6.npy'), ('carboxylate', 'delta_hbond_Carboxylate_251_91_361_6.npy')]
-        HABOND_DATASET_NAMES = [('alcohol', 'delta_halphabond_alcohol_221_91_361_6.npy'), ('carboxy', 'delta_halphabond_carboxy_221_91_361_6.npy'), ('oxygen', 'delta_halphabond_oxygen_221_91_361_12.npy')]
+        HBOND_DATASET_NAMES = [(HBAcceptorType.Amide, 'delta_hbond_251_91_361_12.npy'), (HBAcceptorType.Alcohol, 'delta_hbond_Alcohol_251_91_361_6.npy'), (HBAcceptorType.Carboxylate, 'delta_hbond_Carboxylate_251_91_361_6.npy')]
+        HABOND_DATASET_NAMES = [(HBAcceptorType.Alcohol, 'delta_halphabond_alcohol_221_91_361_6.npy'), (HBAcceptorType.Carboxylate, 'delta_halphabond_carboxy_221_91_361_6.npy'), (HBAcceptorType.Amide, 'delta_halphabond_oxygen_221_91_361_12.npy')]
+        
+        HBOND_R_MIN = 1.5
+        HBOND_R_DELTA = 0.01
+        HBOND_TETHA_MIN = 90.0
+        HBOND_TETHA_DELTA = 1.0
+        HBOND_RHO_MIN = 0.0
+        HBOND_RHO_DELTA = 1.0
+
+        HABOND_R_MIN = 1.8
+        HABOND_R_DELTA = 0.01
+        HABOND_TETHA_MIN = 90.0
+        HABOND_TETHA_DELTA = 1.0
+        HABOND_RHO_MIN = 0.0
+        HABOND_RHO_DELTA = 1.0
         
         
         
@@ -185,7 +218,14 @@ class PyProCS15:
                 self.path = Path(path_to_dataset_dir)
                 
             self.dihedral_dataset = {resname: {atomname: self._setup_dihedral_dataset(self.path / Path(f'{resname}_{atomname}.npy'), itp) for atomname in self.ATOM_TYPES} for resname, itp in self.AMINO_ACIDS}
-            
+            self.hbond_dataset , self.habond_dataset = self._setup_hydrogen_bond_dataset(self.path)
+
+            self.dihedral_ala_std_prev = np.zeros( len(DIHEDRAL_CONTRIBUTION_ORDERS) )
+            self.dihedral_ala_std_next = np.zeros( len(DIHEDRAL_CONTRIBUTION_ORDERS) )
+            for i, atom in enumerate(self.ATOM_TYPES):
+                self.dihedral_ala_std_prev[i] = self.dihedral_dataset['ALA'][atom][2]([-120, 140])[0]
+                self.dihedral_ala_std_next[i] = self.dihedral_dataset['ALA'][atom][0]([-120, 140])[0]
+
         def _setup_dihedral_dataset(self, filepath, interpolation_type):
             
             data = np.lib.format.open_memmap(filepath)
@@ -206,6 +246,41 @@ class PyProCS15:
                 dataset.append( RegularGridInterpolator(angles, data[i,...], method = method) )
             
             return dataset
+        
+        def _setup_hydrogen_bond_dataset(self, filepath):
+            
+            def make_regular_grids(dataset_names, bond_min_delta):
+                dataset = {}
+                for (name, filename) in dataset_names:
+                    d = np.lib.format.open_memmap(filepath / filename)
+                    shape = d.shape
+
+                    indices = tuple(map(lambda i: bond_min_delta[i][0] + np.arange(shape[i])*bond_min_delta[i][1]  , range(3)))
+                    dataset[name] = {}
+
+                    for i, atom in enumerate(self.ATOM_TYPES):
+                        dataset[name][atom] = RegularGridInterpolator(indices, d[...,i], method = 'nearest', bounds_error = False, fill_value = 0.0)
+                return dataset
+
+            
+            
+            hbond_min_delta = [
+                (self.HBOND_R_MIN, self.HBOND_R_DELTA),
+                (self.HBOND_TETHA_MIN, self.HBOND_TETHA_DELTA),
+                (self.HBOND_RHO_MIN, self.HBOND_RHO_DELTA) \
+                ]
+            
+            habond_min_delta = [
+                (self.HABOND_R_MIN, self.HABOND_R_DELTA),
+                (self.HABOND_TETHA_MIN, self.HABOND_TETHA_DELTA),
+                (self.HABOND_RHO_MIN, self.HABOND_RHO_DELTA) \
+                ]
+            
+            hbond_dataset = make_regular_grids(self.HBOND_DATASET_NAMES, hbond_min_delta)
+            habond_dataset = make_regular_grids(self.HABOND_DATASET_NAMES, habond_min_delta)
+
+            return hbond_dataset, habond_dataset
+
                 
                 
                 
@@ -327,7 +402,34 @@ class PyProCS15:
                 raise AtomMissingException()
             except Exception as e:
                 raise e
+        
+        def get_contribution(self, dataset):
+
             
+
+            if self.residue.prev is None or self.residue.next is None:
+                return None
+            
+
+            if self.ignoring or self.residue.prev.dihedral_contribution.ignoring or self.residue.next.dihedral_contribution.ignoring:
+                return None
+            
+            contribs = np.zeros(len(DIHEDRAL_CONTRIBUTION_ORDERS))
+            
+            for i, (pdbname, procsname) in enumerate(DIHEDRAL_CONTRIBUTION_ORDERS):
+
+                contrib = dataset.dihedral_dataset[self.resname][procsname][1]([self.phi, self.psi] + self.chi)[0]
+                contrib_prev = \
+                    dataset.dihedral_dataset[self.residue.prev.resname][procsname][2]([self.residue.prev.dihedral_contribution.phi, self.residue.prev.dihedral_contribution.psi] + self.residue.prev.dihedral_contribution.chi)[0] \
+                     - dataset.dihedral_ala_std_prev[i]
+                
+                contrib_next = \
+                    dataset.dihedral_dataset[self.residue.next.resname][procsname][0]([self.residue.next.dihedral_contribution.phi, self.residue.next.dihedral_contribution.psi] + self.residue.next.dihedral_contribution.chi)[0] \
+                     - dataset.dihedral_ala_std_next[i]
+                
+                contribs[i] = contrib + contrib_next + contrib_prev
+
+            return contribs
         
     class _RingCurrentDonor:
         
@@ -400,17 +502,7 @@ class PyProCS15:
             
     class _Hydrogen_bond:
         
-        class DonorType(Enum):
-            Ammonium = auto()
-            Amide = auto()
-            AlphaHydrogen = auto()
-            Indole = auto()
-            Guanidinium = auto()
-            
-        class AcceptorType(Enum):
-            Carboxylate = auto()
-            Alcohol = auto()
-            Amide = auto()
+
         
         def __init__(self, residue):
             
@@ -457,56 +549,56 @@ class PyProCS15:
             resname = residue.get_resname()
             
             if 'H1' in residue:
-                self._add_donor_atoms(self.donors, residue, [f'H{i}' for i in range(1, 4)], residue, 'N', self.DonorType.Ammonium)
+                self._add_donor_atoms(self.donors, residue, [f'H{i}' for i in range(1, 4)], residue, 'N', HBDonorType.Ammonium)
             elif resname != 'PRO':
-                self._add_donor_atoms(self.donors, residue, 'H', residue, 'N', self.DonorType.Amide)
+                self._add_donor_atoms(self.donors, residue, 'H', residue, 'N', HBDonorType.Amide)
                 
             if resname == 'GLY':
-                self._add_donor_atoms(self.donors, residue, [f'HA{i}' for i in range(2, 4)], residue, 'CA', self.DonorType.Amide)
+                self._add_donor_atoms(self.donors, residue, [f'HA{i}' for i in range(2, 4)], residue, 'CA', HBDonorType.AlphaHydrogen)
             else:
-                self._add_donor_atoms(self.donors, residue, 'HA', residue, 'CA', self.DonorType.Amide)
+                self._add_donor_atoms(self.donors, residue, 'HA', residue, 'CA', HBDonorType.AlphaHydrogen)
                 
             
             if resname == 'ASN':
-                self._add_donor_atoms(self.donors, residue, [f'HD2{i}' for i in range(1, 3)], residue, 'ND2', self.DonorType.Amide)
+                self._add_donor_atoms(self.donors, residue, [f'HD2{i}' for i in range(1, 3)], residue, 'ND2', HBDonorType.Amide)
             elif resname == 'GLN':
-                self._add_donor_atoms(self.donors, residue, [f'HE2{i}' for i in range(1, 3)], residue, 'NE2', self.DonorType.Amide)
+                self._add_donor_atoms(self.donors, residue, [f'HE2{i}' for i in range(1, 3)], residue, 'NE2', HBDonorType.Amide)
             elif resname == 'HIS':
                 if 'HD1' in residue:
-                    self._add_donor_atoms(self.donors, residue, 'HD1', residue, 'ND1', self.DonorType.Indole)
+                    self._add_donor_atoms(self.donors, residue, 'HD1', residue, 'ND1', HBDonorType.Indole)
                 if 'HE2' in residue:
-                    self._add_donor_atoms(self.donors, residue, 'HE2', residue, 'NE2', self.DonorType.Indole)
+                    self._add_donor_atoms(self.donors, residue, 'HE2', residue, 'NE2', HBDonorType.Indole)
             elif resname == 'TRP':
-                self._add_donor_atoms(self.donors, residue, 'HE1', residue, 'NE1', self.DonorType.Indole)
+                self._add_donor_atoms(self.donors, residue, 'HE1', residue, 'NE1', HBDonorType.Indole)
             elif resname == 'LYS':
-                self._add_donor_atoms(self.donors, residue, [f'HZ{i}' for i in range(1, 3)], residue, 'NZ', self.DonorType.Ammonium)
+                self._add_donor_atoms(self.donors, residue, [f'HZ{i}' for i in range(1, 3)], residue, 'NZ', HBDonorType.Ammonium)
             elif resname == 'ARG':
-                self._add_donor_atoms(self.donors, residue, ['HH11', 'HH12', 'HH21', 'HH22', 'HE'], residue, ['NH1', 'NH1', 'NH2', 'NH2', 'NE'], self.DonorType.Guanidinium)
+                self._add_donor_atoms(self.donors, residue, ['HH11', 'HH12', 'HH21', 'HH22', 'HE'], residue, ['NH1', 'NH1', 'NH2', 'NH2', 'NE'], HBDonorType.Guanidinium)
                 
         def _add_acceptors(self, residue):
             
             resname = residue.get_resname()
             
             if 'OXT' in residue:
-                self._add_acceptor_atoms(self.acceptors, residue, ['O', 'OXT'], residue, 'C', residue, ['OXT', 'O'], self.AcceptorType.Carboxylate)
+                self._add_acceptor_atoms(self.acceptors, residue, ['O', 'OXT'], residue, 'C', residue, ['OXT', 'O'], HBAcceptorType.Carboxylate)
             else:
                 if residue.next is not None:
-                    self._add_acceptor_atoms(self.acceptors, residue, 'O', residue, 'C', residue.next, 'N', self.AcceptorType.Amide)
+                    self._add_acceptor_atoms(self.acceptors, residue, 'O', residue, 'C', residue.next, 'N', HBAcceptorType.Amide)
                     
             if resname == 'SER':
-                self._add_acceptor_atoms(self.acceptors, residue, 'OG', residue, 'CB', residue, 'HG', self.AcceptorType.Alcohol)
+                self._add_acceptor_atoms(self.acceptors, residue, 'OG', residue, 'CB', residue, 'HG', HBAcceptorType.Alcohol)
             elif resname == 'THR': 
-                self._add_acceptor_atoms(self.acceptors, residue, 'OG1', residue, 'CB', residue, 'HG1', self.AcceptorType.Alcohol)
+                self._add_acceptor_atoms(self.acceptors, residue, 'OG1', residue, 'CB', residue, 'HG1', HBAcceptorType.Alcohol)
             elif resname == 'TYR':
-                self._add_acceptor_atoms(self.acceptors, residue, 'OH', residue, 'CZ', residue, 'HH', self.AcceptorType.Alcohol)
+                self._add_acceptor_atoms(self.acceptors, residue, 'OH', residue, 'CZ', residue, 'HH', HBAcceptorType.Alcohol)
             elif resname == 'ASN':
-                self._add_acceptor_atoms(self.acceptors, residue, 'OD1', residue, 'CG', residue, 'ND2', self.AcceptorType.Amide)
+                self._add_acceptor_atoms(self.acceptors, residue, 'OD1', residue, 'CG', residue, 'ND2', HBAcceptorType.Amide)
             elif resname == 'GLN':
-                self._add_acceptor_atoms(self.acceptors, residue, 'OE1', residue, 'CD', residue, 'NE2', self.AcceptorType.Amide)
+                self._add_acceptor_atoms(self.acceptors, residue, 'OE1', residue, 'CD', residue, 'NE2', HBAcceptorType.Amide)
             elif resname == 'ASP':
-                self._add_acceptor_atoms(self.acceptors, residue, ['OD1', 'OD2'], residue, 'CG', residue, 'CB', self.AcceptorType.Carboxylate)
+                self._add_acceptor_atoms(self.acceptors, residue, ['OD1', 'OD2'], residue, 'CG', residue, 'CB', HBAcceptorType.Carboxylate)
             elif resname == 'GLU':
-                self._add_acceptor_atoms(self.acceptors, residue, ['OE1', 'OE2'], residue, 'CD', residue, 'CG', self.AcceptorType.Carboxylate)
+                self._add_acceptor_atoms(self.acceptors, residue, ['OE1', 'OE2'], residue, 'CD', residue, 'CG', HBAcceptorType.Carboxylate)
             pass
                 
 class InvalidFileTypeException(Exception):
