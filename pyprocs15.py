@@ -1,19 +1,35 @@
 import sys
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
 import Bio.PDB
 import Bio.PDB.vectors
 from enum import Enum, auto
+
+from pathlib import Path
 
 AROMATIC_RESIDUES = ['HIS', 'PHE', 'TRP', 'TYR']
 
 class PyProCS15:
     
-    def __init__(self, structure_file):
+    def __init__(self, structure_file, procs_param_file_dir = None):
+        
+        from os import getenv
+        
+        self.procs_param_file_dir = procs_param_file_dir
+        if self.procs_param_file_dir is None:
+            self.procs_param_file_dir = getenv('PROCS15DIR')
+
+        if self.procs_param_file_dir is None:
+            raise ProCS15ParameterFileException()
+        
+        self.procs_dataset = self.ProCS15_dataset(self.procs_param_file_dir)
+        
         
         
         self.structure = self._get_structure_object(structure_file)
 
         self._prepare()
+        
         
 
     def _get_structure_object(self, filename):
@@ -120,6 +136,82 @@ class PyProCS15:
             print(self.structure[model_id][chain_id][resid].dihedral_contribution.chi)
         
         pass
+    
+    class ProCS15_dataset:
+        
+        class InterpolationType(Enum):
+            Cubic = auto()
+            Nearest = auto()
+            
+        
+        
+        AMINO_ACIDS = [
+            ('ALA', InterpolationType.Cubic),
+            ('CYS', InterpolationType.Cubic),
+            ('ASP', InterpolationType.Nearest),
+            ('GLU', InterpolationType.Nearest),
+            ('PHE', InterpolationType.Nearest),
+            ('GLY', InterpolationType.Cubic),
+            ('HIS', InterpolationType.Nearest),
+            ('ILE', InterpolationType.Nearest),
+            ('LYS', InterpolationType.Nearest),
+            ('LEU', InterpolationType.Nearest),            
+            ('MET', InterpolationType.Nearest),
+            ('ASN', InterpolationType.Nearest),
+            ('PRO', InterpolationType.Cubic),
+            ('GLN', InterpolationType.Nearest),
+            ('ARG', InterpolationType.Nearest),
+            ('SER', InterpolationType.Cubic),
+            ('THR', InterpolationType.Nearest),
+            ('VAL', InterpolationType.Cubic),
+            ('TRP', InterpolationType.Nearest),
+            ('TYR', InterpolationType.Nearest) \
+            ]
+        
+        ATOM_TYPES = ['ca', 'cb', 'co', 'nh', 'hn', 'ha']
+        
+        DIHEDRAL_DATASET_NAMES = [(f'{aa}_{atom}.npy', itp_type)  for aa, itp_type in AMINO_ACIDS for atom in ['ca', 'cb', 'co', 'nh', 'hn', 'ha']]
+        
+        HBOND_DATASET_NAMES = [('carbonyl', 'delta_hbond_251_91_361_12.npy'), ('alcohol', 'delta_hbond_Alcohol_251_91_361_6.npy'), ('carboxylate', 'delta_hbond_Carboxylate_251_91_361_6.npy')]
+        HABOND_DATASET_NAMES = [('alcohol', 'delta_halphabond_alcohol_221_91_361_6.npy'), ('carboxy', 'delta_halphabond_carboxy_221_91_361_6.npy'), ('oxygen', 'delta_halphabond_oxygen_221_91_361_12.npy')]
+        
+        
+        
+        def __init__(self, path_to_dataset_dir):
+            
+            if isinstance(path_to_dataset_dir, Path):
+                self.path = path_to_dataset_dir
+            else:
+                self.path = Path(path_to_dataset_dir)
+                
+            self.dihedral_dataset = {resname: {atomname: self._setup_dihedral_dataset(self.path / Path(f'{resname}_{atomname}.npy'), itp) for atomname in self.ATOM_TYPES} for resname, itp in self.AMINO_ACIDS}
+            
+        def _setup_dihedral_dataset(self, filepath, interpolation_type):
+            
+            data = np.lib.format.open_memmap(filepath)
+            
+            angles = tuple([np.linspace(-180, 180, num = num) for num in data.shape[1:]])
+            
+            if interpolation_type == self.InterpolationType.Nearest:
+                method = 'nearest'
+            elif interpolation_type == self.InterpolationType.Cubic:
+                method = 'cubic'
+            else:
+                method = None
+            
+            dataset = []
+            
+            for i in range(3):
+                
+                dataset.append( RegularGridInterpolator(angles, data[i,...], method = method) )
+            
+            return dataset
+                
+                
+                
+            
+            
+            
     
     class _Dihedral_contribution:
         
@@ -440,6 +532,18 @@ class AtomMissingException(Exception):
         
         if self.arg == '':
             return 'Some atoms are missing.'
+        else:
+            return self.arg
+        
+class ProCS15ParameterFileException(Exception):
+    
+    def __init__(self, arg = ''):
+        self.arg = arg
+        
+    def __str__(self):
+        
+        if self.arg == '':
+            return 'ProCS15 parameter files cannot be loaded.'
         else:
             return self.arg
 
