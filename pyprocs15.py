@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
+from scipy.spatial.distance import cdist
 import Bio.PDB
 import Bio.PDB.vectors
 from enum import Enum, auto
@@ -602,6 +603,49 @@ class PyProCS15:
             elif resname == 'GLU':
                 self._add_acceptor_atoms(self.acceptors, residue, ['OE1', 'OE2'], residue, 'CD', residue, 'CG', HBAcceptorType.Carboxylate)
             pass
+
+    class _Hydrogen_bond_distance_cache:
+
+        def __init__(self):
+            self.donor_atoms = []
+            self.last_donor_cache_id = -1
+
+            self.acceptor_atoms = []
+            self.last_acceptor_cache_id = -1
+
+
+            self.distance_matrix = None
+
+        def add_donor_atom(self, donor_atom):
+
+            self.last_donor_cache_id += 1
+            self.donor_atoms.append(donor_atom)
+            donor_atom.donor_distance_cache_id = self.last_donor_cache_id
+            pass
+
+        def add_acceptor_atom(self, acceptor_atom):
+
+            self.last_acceptor_cache_id += 1
+            self.acceptor_atoms.append(acceptor_atom)
+            acceptor_atom.acceptor_distance_cache_id = self.last_acceptor_cache_id
+            pass
+
+        def generate_distance_cache(self):
+
+            donor_coords = np.array([atom.get_coord() for atom in self.donor_atoms])
+            acceptor_coords = np.array([atom.get_coord() for atom in self.acceptor_atoms])
+
+            self.distance_matrix = cdist(donor_coords, acceptor_coords, metric = 'euclidean')
+
+        def get_distance(self, donor_atom, acceptor_atom):
+
+            if self.distance_matrix is None:
+                self.generate_distance_cache()
+            
+            return self.distance_matrix[donor_atom.donor_distance_cache_id, acceptor_atom.acceptor_distance_cache_id]
+
+
+
                 
 class InvalidFileTypeException(Exception):
     
