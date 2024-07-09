@@ -308,23 +308,23 @@ class PyProCS15:
             CHI_ATOMS = {\
                         'GLY': [],
                         'ALA': [],
-                        'ASP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']], #OK
-                        'GLU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']], #OK
-                        'HIS': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'ND1']], #OK
-                        'THR': [['N', 'CA', 'CB', 'OG1'], ['CA', 'CB', 'OG1', 'HG1']], #OK
-                        'SER': [['N', 'CA', 'CB', 'OG']], #OK
-                        'CYS': [['N', 'CA', 'CB', 'SG']], #OK
-                        'ILE': [['N', 'CA', 'CB', 'CG1'], ['CA', 'CB', 'CG1', 'CD']], #OK
-                        'LEU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']], #OK
-                        'ASN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']], #OK
-                        'TYR': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']], #OK
-                        'PHE': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']], #OK
+                        'ASP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
+                        'GLU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
+                        'HIS': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'ND1']],
+                        'THR': [['N', 'CA', 'CB', 'OG1'], ['CA', 'CB', 'OG1', 'HG1']],
+                        'SER': [['N', 'CA', 'CB', 'OG']],
+                        'CYS': [['N', 'CA', 'CB', 'SG']],
+                        'ILE': [['N', 'CA', 'CB', 'CG1'], ['CA', 'CB', 'CG1', 'CD1']],
+                        'LEU': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                        'ASN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'OD1']],
+                        'TYR': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                        'PHE': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
                         'PRO': [],
-                        'TRP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']], #OK
-                        'LYS': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'CE'], ['CG', 'CD', 'CE', 'NZ']], #OK
-                        'ARG': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'NE'], ['CG', 'CD', 'NE', 'CZ']], #OK
-                        'GLN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']], #OK
-                        'MET': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'SD'], ['CB', 'CG', 'SD', 'CE']], #OK
+                        'TRP': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD1']],
+                        'LYS': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'CE'], ['CG', 'CD', 'CE', 'NZ']],
+                        'ARG': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'NE'], ['CG', 'CD', 'NE', 'CZ']],
+                        'GLN': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'CD'], ['CB', 'CG', 'CD', 'OE1']],
+                        'MET': [['N', 'CA', 'CB', 'CG'], ['CA', 'CB', 'CG', 'SD'], ['CB', 'CG', 'SD', 'CE']],
                         'VAL': [['CG1', 'CA', 'CB', 'CG2']], #Special case
                         }
 
@@ -347,7 +347,7 @@ class PyProCS15:
                 if res_pre.hetatm:
                     raise KeyError
                 
-                res_cur.phi = np.rad2deg( 
+                self.phi = np.rad2deg( 
                                         Bio.PDB.vectors.calc_dihedral(
                                             res_pre['C'].get_vector(),
                                             res_cur['N'].get_vector(),
@@ -369,7 +369,7 @@ class PyProCS15:
                 if res_pro.hetatm:
                     raise KeyError
                 
-                res_cur.psi = np.rad2deg( 
+                self.psi = np.rad2deg( 
                                         Bio.PDB.vectors.calc_dihedral(
                                             res_cur['N'].get_vector(),
                                             res_cur['CA'].get_vector(),
