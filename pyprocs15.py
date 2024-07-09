@@ -40,14 +40,15 @@ class PyProCS15:
             raise ProCS15ParameterFileException()
         
         self.procs_dataset = self._ProCS15_dataset(self.procs_param_file_dir)
-        
+        self.hbond_dist_cache = self._Hydrogen_bond_distance_cache()        
         
         
         
         self.structure = self._get_structure_object(structure_file)
 
+
         self._prepare()
-        print(self.procs_dataset.hbond_dataset[HBAcceptorType.Carboxylate]['ca']([100, -3000, -3000]))
+        
         
 
     def _get_structure_object(self, filename):
@@ -83,6 +84,10 @@ class PyProCS15:
                     if hetflag.strip() != '':
                         residue.hetatm = True
                         continue
+                    
+                    residue.model = model_id
+                    residue.chain = chain_id
+                    residue.resid = resid
                     
                     self.all_residues.append( (model_id, chain_id, resid) )
                     
@@ -131,7 +136,7 @@ class PyProCS15:
                         print(f'Atom not found in {resid}-th residue, this and the adjacent residues will be ignored', file = sys.stderr)
                     
                     
-                    residue.hydrogen_bonds = self._Hydrogen_bond(residue)
+                    residue.hydrogen_bonds = self._Hydrogen_bond(residue, self.hbond_dist_cache)
            
                     
                     if resname in AROMATIC_RESIDUES:
@@ -259,9 +264,11 @@ class PyProCS15:
                     indices = tuple(map(lambda i: bond_min_delta[i][0] + np.arange(shape[i])*bond_min_delta[i][1]  , range(3)))
                     dataset[name] = {}
 
+                    max_dist = indices[0][-1]
+
                     for i, atom in enumerate(self.ATOM_TYPES):
                         dataset[name][atom] = RegularGridInterpolator(indices, d[...,i], method = 'nearest', bounds_error = False, fill_value = 0.0)
-                return dataset
+                return dataset, max_dist
 
             
             
@@ -277,8 +284,8 @@ class PyProCS15:
                 (self.HABOND_RHO_MIN, self.HABOND_RHO_DELTA) \
                 ]
             
-            hbond_dataset = make_regular_grids(self.HBOND_DATASET_NAMES, hbond_min_delta)
-            habond_dataset = make_regular_grids(self.HABOND_DATASET_NAMES, habond_min_delta)
+            hbond_dataset, self.HBOND_R_MAX = make_regular_grids(self.HBOND_DATASET_NAMES, hbond_min_delta)
+            habond_dataset, self.HABOND_R_MAX = make_regular_grids(self.HABOND_DATASET_NAMES, habond_min_delta)
 
             return hbond_dataset, habond_dataset
 
@@ -507,14 +514,22 @@ class PyProCS15:
         
 
         
-        def __init__(self, residue):
+        def __init__(self, residue, distance_cache):
             
             self.donors = [] # list of tuples, tuples should be like (Hydrogen atom obj, second atom obj, DonorType)
             self.acceptors = [] # list of tuples, tuples should be like (Oxygen atom obj, second atom obj, third atom obj, AcceptorType)
             
+            self.residue = residue
+
             self._add_donors(residue)
             self._add_acceptors(residue)
-            
+
+            for donor in self.donors:
+                distance_cache.add_donor_atom(donor[0])
+
+            for acceptor in self.acceptors:
+                distance_cache.add_acceptor_atom(acceptor[0])
+
             pass
             
         def _add_donor_atoms(self, destination, first_residue,  first_atom_names,  second_residue, second_atom_names, hb_type):
@@ -602,6 +617,39 @@ class PyProCS15:
                 self._add_acceptor_atoms(self.acceptors, residue, ['OD1', 'OD2'], residue, 'CG', residue, 'CB', HBAcceptorType.Carboxylate)
             elif resname == 'GLU':
                 self._add_acceptor_atoms(self.acceptors, residue, ['OE1', 'OE2'], residue, 'CD', residue, 'CG', HBAcceptorType.Carboxylate)
+            pass
+
+        def get_primary_contribution(self, residues, dataset, dist_cache):
+
+            for counter_residue in residues:
+
+                if counter_residue.model != self.residue.model:
+                    continue
+
+                if ( counter_residue.chain == self.residue.chain ) and np.abs(counter_residue.resid - self.residue.resid) < 2:
+                    continue
+                
+                for acceptor in self.acceptors:
+
+                    for donor in counter_residue.hydrogen_bonds.donors:
+
+                        dist = dist_cache.get_distance(donor[0], acceptor[0])
+
+                        if donor[2] == HBDonorType.AlphaHydrogen:
+                            dist_max = dataset.HABOND_R_MAX
+                        else:
+                            dist_max = dataset.HBOND_R_MAX
+
+                        if dist > dist_max:
+                            continue
+
+                        thetha = np.rad2deg( Bio.PDB.vector.calc_angle(donor[0], acceptor[0], acceptor[1]) )
+                        rho = np.rad2deg( Bio.PDB.vector.calc_dihedral(donor[0], acceptor[0], acceptor[1], acceptor[2]) )
+
+
+                        pass
+                    pass
+
             pass
 
     class _Hydrogen_bond_distance_cache:
