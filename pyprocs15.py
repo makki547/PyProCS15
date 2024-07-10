@@ -144,7 +144,50 @@ class PyProCS15:
                     else:
                         residue.ring_current_donor = None
                         
-                    
+    def _calc_ring_contribution(self, model_id, chain_id, resid):
+
+        #only hydrogen atoms are calculated
+        NATOM = len(DIHEDRAL_CONTRIBUTION_ORDERS)
+        HA_ID = 5
+        HN_ID = 4
+
+        atoms = [(HA_ID, 'HA'), (HN_ID, 'H')]
+        gly_atoms = [(HA_ID, 'HA2'), (HA_ID, 'HA3'), (HN_ID, 'H')] 
+        pro_atoms = [(HA_ID, 'HA')]
+
+        contrib = np.zeros(NATOM)
+
+        residue = self.structure[model_id][chain_id][resid]
+        if residue.resname == 'GLY':
+            atoms = gly_atoms
+        elif residue.resname == 'PRO':
+            atoms = pro_atoms
+
+        for i, atom in atoms:
+            try:
+                hydrogen = residue[atom]
+                for residue in self.structure.get_residues():
+                    if residue.hetatm:
+                        continue
+                    if residue.model != model_id:
+                        continue
+
+                    if (residue.chain == chain_id) and (np.abs(residue.resid - resid) < 2):
+                        continue
+
+                    if residue.ring_current_donor is None:
+                        continue
+
+                    contrib[i] += residue.ring_current_donor.get_shielding(hydrogen)
+
+            except KeyError:
+                AtomMissingException('Backbone hydrogens are missing')
+            except Exception as e:
+                raise e
+            
+        return contrib
+
+
                     
                     
     def calc_shieldings(self, targets = None):
@@ -158,6 +201,8 @@ class PyProCS15:
             model_id, chain_id, resid = target
             print(target)
             print(self.structure[model_id][chain_id][resid].dihedral_contribution.get_contribution(self.procs_dataset))
+            print(self.structure[model_id][chain_id][resid].hydrogen_bonds.get_primary_contribution(self.structure[model_id].get_residues(), self.procs_dataset, self.hbond_dist_cache))
+            print(self.structure[model_id][chain_id][resid].hydrogen_bonds.get_secondary_contribution(self.structure[model_id].get_residues(), self.procs_dataset, self.hbond_dist_cache))
             #print(self.structure[model_id][chain_id][resid].dihedral_contribution.chi)
         
         pass
@@ -619,38 +664,123 @@ class PyProCS15:
                 self._add_acceptor_atoms(self.acceptors, residue, ['OE1', 'OE2'], residue, 'CD', residue, 'CG', HBAcceptorType.Carboxylate)
             pass
 
-        def get_primary_contribution(self, residues, dataset, dist_cache):
+        def get_primary_contribution(self, residues, dataset, dist_cache, water_correction = True):
+
+            atoms = PyProCS15._ProCS15_dataset.ATOM_TYPES
+            HN_ID = 4
+            WATER_CORR = 2.07
+            contrib = np.zeros(len(atoms))
 
             for counter_residue in residues:
+
+
+                if counter_residue.hetatm:
+                    continue
+
+                if counter_residue.model != self.residue.model:
+                    continue
+
+                #if ( counter_residue.chain == self.residue.chain ) and np.abs(counter_residue.resid - self.residue.resid) < 2:
+                #    continue
+
+                if self.residue == counter_residue:
+                    continue
+                
+                for donor in self.donors:
+
+                    v1 = donor[0].get_vector()
+                    
+                    for acceptor in counter_residue.hydrogen_bonds.acceptors:
+
+                        dist = dist_cache.get_distance(donor[0], acceptor[0])
+
+                        if donor[2] == HBDonorType.AlphaHydrogen:
+                            dist_max = dataset.HABOND_R_MAX
+                            dataset_ = dataset.habond_dataset[acceptor[3]]
+                        else:
+                            dist_max = dataset.HBOND_R_MAX
+                            dataset_ = dataset.hbond_dataset[acceptor[3]]
+
+                        if dist > dist_max:
+                            continue
+
+                        
+                        v2 = acceptor[0].get_vector()
+                        v3 = acceptor[1].get_vector()
+                        v4 = acceptor[2].get_vector()
+    
+
+                        theta = np.rad2deg( Bio.PDB.vectors.calc_angle(v1, v2, v3) )
+                        rho = np.rad2deg( Bio.PDB.vectors.calc_dihedral(v1, v2, v3, v4) )
+
+                        for i,atom in enumerate(atoms):
+                            contrib[i] += dataset_[atom]([dist, theta, rho])[0]
+
+
+                        pass
+                    pass
+
+            #amide proton does not form any hydrogen bonds to the other residues
+            if water_correction and (self.residue.resname != 'PRO') and np.abs(contrib[HN_ID] < 1.0E-6):
+                contrib[HN_ID] -= WATER_CORR
+
+            return contrib
+
+        def get_secondary_contribution(self, residues, dataset, dist_cache):
+
+            atoms = PyProCS15._ProCS15_dataset.ATOM_TYPES
+            contrib = np.zeros(len(atoms))
+
+            for counter_residue in residues:
+
+
+                if counter_residue.hetatm:
+                    continue
 
                 if counter_residue.model != self.residue.model:
                     continue
 
                 if ( counter_residue.chain == self.residue.chain ) and np.abs(counter_residue.resid - self.residue.resid) < 2:
                     continue
+
                 
                 for acceptor in self.acceptors:
 
+                    if acceptor[0].get_name() != 'O':
+                        continue
+
+                    v2 = acceptor[0].get_vector()
+                    v3 = acceptor[1].get_vector()
+                    v4 = acceptor[2].get_vector()
+                        
                     for donor in counter_residue.hydrogen_bonds.donors:
 
                         dist = dist_cache.get_distance(donor[0], acceptor[0])
 
                         if donor[2] == HBDonorType.AlphaHydrogen:
                             dist_max = dataset.HABOND_R_MAX
+                            dataset_ = dataset.habond_dataset[acceptor[3]]
                         else:
                             dist_max = dataset.HBOND_R_MAX
+                            dataset_ = dataset.hbond_dataset[acceptor[3]]
 
                         if dist > dist_max:
                             continue
 
-                        thetha = np.rad2deg( Bio.PDB.vector.calc_angle(donor[0], acceptor[0], acceptor[1]) )
-                        rho = np.rad2deg( Bio.PDB.vector.calc_dihedral(donor[0], acceptor[0], acceptor[1], acceptor[2]) )
+                        v1 = donor[0].get_vector()
+                        
+
+                        theta = np.rad2deg( Bio.PDB.vectors.calc_angle(v1, v2, v3) )
+                        rho = np.rad2deg( Bio.PDB.vectors.calc_dihedral(v1, v2, v3, v4) )
+
+                        for i,atom in enumerate(atoms):
+                            contrib[i] += dataset_[atom]([dist, theta, rho])[0]
 
 
                         pass
                     pass
 
-            pass
+            return contrib
 
     class _Hydrogen_bond_distance_cache:
 
