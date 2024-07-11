@@ -26,6 +26,18 @@ class HBAcceptorType(Enum):
 
 DIHEDRAL_CONTRIBUTION_ORDERS = [('CA', 'ca'), ('CB', 'cb'), ('C', 'co'), ('N', 'nh'), ('H', 'hn'), ('HA', 'ha')]
 
+PROCS15_CONTRIBUTIONS = np.array(
+    # CA, CB, C, N, HN, HA
+    [
+        [1, 1, 1, 1, 1, 1], #Dihedral
+        [0, 0, 0, 1, 1, 1], #HN hydrogen bond, primary
+        [0, 0, 0, 0, 1, 1], #HA hydrogen bond, primary
+        [1, 0, 1, 1, 1, 1], #HN hydrogen bond, secondary
+        [1, 0, 1, 1, 1, 1], #HA hydrogen bond, secondary
+        [0, 0, 0, 0, 1, 1], #Ring current
+    ]
+)
+
 class PyProCS15:
     
     def __init__(self, structure_file, procs_param_file_dir = None):
@@ -40,16 +52,14 @@ class PyProCS15:
             raise ProCS15ParameterFileException()
         
         self.procs_dataset = self._ProCS15_dataset(self.procs_param_file_dir)
+        self.load_structure(structure_file)
+        
+
+    def load_structure(self, filename):
+        
+        self.structure = self._get_structure_object(filename)
         self.hbond_dist_cache = self._Hydrogen_bond_distance_cache()        
-        
-        
-        
-        self.structure = self._get_structure_object(structure_file)
-
-
         self._prepare()
-        
-        
 
     def _get_structure_object(self, filename):
         
@@ -194,18 +204,35 @@ class PyProCS15:
         
         if targets is None:
             targets = self.all_residues
-            
-        for target in targets:
-            
-            
-            model_id, chain_id, resid = target
-            print(target)
-            print(self.structure[model_id][chain_id][resid].dihedral_contribution.get_contribution(self.procs_dataset))
-            print(self.structure[model_id][chain_id][resid].hydrogen_bonds.get_primary_contribution(self.structure[model_id].get_residues(), self.procs_dataset, self.hbond_dist_cache))
-            print(self.structure[model_id][chain_id][resid].hydrogen_bonds.get_secondary_contribution(self.structure[model_id].get_residues(), self.procs_dataset, self.hbond_dist_cache))
-            #print(self.structure[model_id][chain_id][resid].dihedral_contribution.chi)
+
+        contribs = np.zeros( tuple([len(targets)]) + PROCS15_CONTRIBUTIONS.shape ) 
         
-        pass
+
+        
+        for i, (model_id, chain_id, resid) in enumerate(targets):
+            try:
+                dihedral_contrib = self.structure[model_id][chain_id][resid].dihedral_contribution.get_contribution(self.procs_dataset)
+
+                hn_hb_primary_contrib, ha_hb_primary_contrib = self.structure[model_id][chain_id][resid].hydrogen_bonds.get_primary_contribution(self.structure[model_id].get_residues(), self.procs_dataset, self.hbond_dist_cache)
+            
+                hn_hb_secondary_contrib, ha_hb_secondary_contrib = self.structure[model_id][chain_id][resid].hydrogen_bonds.get_secondary_contribution(self.structure[model_id].get_residues(), self.procs_dataset, self.hbond_dist_cache)
+            
+                ring_current_contrib = self._calc_ring_contribution(model_id, chain_id, resid)
+
+                contribs[i,0,:] = dihedral_contrib
+                contribs[i,1,:] = hn_hb_primary_contrib
+                contribs[i,2,:] = ha_hb_primary_contrib
+                contribs[i,3,:] = hn_hb_secondary_contrib
+                contribs[i,4,:] = ha_hb_secondary_contrib
+                contribs[i,5,:] = ring_current_contrib
+            except AtomMissingException as e:
+                print(e, file=sys.stderr)
+            except Exception as e:
+                raise e
+
+        
+        
+        return np.sum(contribs * PROCS15_CONTRIBUTIONS, axis = 1)
     
     class _ProCS15_dataset:
         
@@ -545,10 +572,13 @@ class PyProCS15:
             return norm_vecs
         
         def get_shielding(self, atom):
-            
+            CUTOFF = 8.0
             atom_vec = np.array(atom.get_coord()) - self.ring_coms
             
             dist = np.linalg.norm(atom_vec)
+            if dist > CUTOFF:
+                return 0.0
+            
             cos_term = np.sum(atom_vec * self.ring_normal_vectors, axis = -1)/dist
             
             return np.sum(self.intensities * (1 - 3*cos_term**2)/dist**3)
@@ -669,7 +699,8 @@ class PyProCS15:
             atoms = PyProCS15._ProCS15_dataset.ATOM_TYPES
             HN_ID = 4
             WATER_CORR = 2.07
-            contrib = np.zeros(len(atoms))
+            hn_contrib = np.zeros(len(atoms))
+            ha_contrib = np.zeros(len(atoms))
 
             for counter_residue in residues:
 
@@ -697,9 +728,11 @@ class PyProCS15:
                         if donor[2] == HBDonorType.AlphaHydrogen:
                             dist_max = dataset.HABOND_R_MAX
                             dataset_ = dataset.habond_dataset[acceptor[3]]
+                            contrib = ha_contrib
                         else:
                             dist_max = dataset.HBOND_R_MAX
                             dataset_ = dataset.hbond_dataset[acceptor[3]]
+                            contrib = hn_contrib
 
                         if dist > dist_max:
                             continue
@@ -721,15 +754,16 @@ class PyProCS15:
                     pass
 
             #amide proton does not form any hydrogen bonds to the other residues
-            if water_correction and (self.residue.resname != 'PRO') and np.abs(contrib[HN_ID] < 1.0E-6):
-                contrib[HN_ID] -= WATER_CORR
+            if water_correction and (self.residue.resname != 'PRO') and np.abs(hn_contrib[HN_ID] < 1.0E-6):
+                hn_contrib[HN_ID] -= WATER_CORR
 
-            return contrib
+            return hn_contrib, ha_contrib
 
         def get_secondary_contribution(self, residues, dataset, dist_cache):
 
             atoms = PyProCS15._ProCS15_dataset.ATOM_TYPES
-            contrib = np.zeros(len(atoms))
+            hn_contrib = np.zeros(len(atoms))
+            ha_contrib = np.zeros(len(atoms))
 
             for counter_residue in residues:
 
@@ -760,9 +794,11 @@ class PyProCS15:
                         if donor[2] == HBDonorType.AlphaHydrogen:
                             dist_max = dataset.HABOND_R_MAX
                             dataset_ = dataset.habond_dataset[acceptor[3]]
+                            contrib = ha_contrib
                         else:
                             dist_max = dataset.HBOND_R_MAX
                             dataset_ = dataset.hbond_dataset[acceptor[3]]
+                            contrib = hn_contrib
 
                         if dist > dist_max:
                             continue
@@ -780,7 +816,7 @@ class PyProCS15:
                         pass
                     pass
 
-            return contrib
+            return hn_contrib, ha_contrib
 
     class _Hydrogen_bond_distance_cache:
 
@@ -859,12 +895,13 @@ class ProCS15ParameterFileException(Exception):
     def __str__(self):
         
         if self.arg == '':
-            return 'ProCS15 parameter files cannot be loaded.'
+            return 'ProCS15 parameter files cannot be loaded.\nDownload the file from: http://www.erda.dk/public/archives/YXJjaGl2ZS1pMHN3TXE=/procs/ProCSnumpyfiles.tar.bz2\nSet the directory to "PROCS15DIR" env. var. or provide to PyProCS constructor'
         else:
             return self.arg
 
 if __name__ == '__main__':
     
     pyprocs15 = PyProCS15('1UBQ_amber.pdb')
-    pyprocs15.calc_shieldings()
+    shieldings = pyprocs15.calc_shieldings()
+    print(shieldings)
     
