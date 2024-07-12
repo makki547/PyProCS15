@@ -490,11 +490,11 @@ class PyProCS15:
             
 
             if self.residue.prev is None or self.residue.next is None:
-                return None
+                raise AtomMissingException()
             
 
             if self.ignoring or self.residue.prev.dihedral_contribution.ignoring or self.residue.next.dihedral_contribution.ignoring:
-                return None
+                raise AtomMissingException()
             
             contribs = np.zeros(len(DIHEDRAL_CONTRIBUTION_ORDERS))
             
