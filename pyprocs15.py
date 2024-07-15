@@ -203,13 +203,15 @@ class PyProCS15:
     def calc_shieldings(self, targets = None):
         
         if targets is None:
-            targets = self.all_residues
+            targets_ = self.all_residues
+        else:
+            targets_ = targets
 
-        contribs = np.zeros( tuple([len(targets)]) + PROCS15_CONTRIBUTIONS.shape ) 
+        contribs = np.zeros( tuple([len(targets_)]) + PROCS15_CONTRIBUTIONS.shape ) 
         
 
         
-        for i, (model_id, chain_id, resid) in enumerate(targets):
+        for i, (model_id, chain_id, resid) in enumerate(targets_):
             try:
                 dihedral_contrib = self.structure[model_id][chain_id][resid].dihedral_contribution.get_contribution(self.procs_dataset)
 
@@ -230,9 +232,11 @@ class PyProCS15:
             except Exception as e:
                 raise e
 
-        
-        
-        return np.sum(contribs * PROCS15_CONTRIBUTIONS, axis = 1)
+        contribs = np.sum(contribs * PROCS15_CONTRIBUTIONS, axis = 1)
+        if targets is not None:
+            return contribs
+        else:
+            return targets_, contribs 
     
     class _ProCS15_dataset:
         
