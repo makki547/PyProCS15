@@ -162,14 +162,21 @@ class PyProCS15:
         HN_ID = 4
 
         atoms = [(HA_ID, 'HA'), (HN_ID, 'H')]
-        gly_atoms = [(HA_ID, 'HA2'), (HA_ID, 'HA3'), (HN_ID, 'H')] 
+        gly_atoms = [(HA_ID, 'HA2'), (HA_ID, 'HA3'), (HN_ID, 'H')]
+        gly12_atoms = [(HA_ID, 'HA2'), (HA_ID, 'HA3'), (HN_ID, 'H')]
         pro_atoms = [(HA_ID, 'HA')]
 
         contrib = np.zeros(NATOM)
 
         residue = self.structure[model_id][chain_id][resid]
         if residue.resname == 'GLY':
-            atoms = gly_atoms
+            if 'HA2' in residue and 'HA3' in residue:
+                atoms = gly_atoms
+            elif 'HA1' in residue and 'HA2' in residue:
+                atoms = gly12_atoms
+            else:
+                AtomMissingException('Backbone hydrogens are missing')
+                
         elif residue.resname == 'PRO':
             atoms = pro_atoms
 
@@ -651,7 +658,10 @@ class PyProCS15:
                 self._add_donor_atoms(self.donors, residue, 'H', residue, 'N', HBDonorType.Amide)
                 
             if resname == 'GLY':
-                self._add_donor_atoms(self.donors, residue, [f'HA{i}' for i in range(2, 4)], residue, 'CA', HBDonorType.AlphaHydrogen)
+                if 'HA2' in residue and 'HA3' in residue:
+                    self._add_donor_atoms(self.donors, residue, [f'HA{i}' for i in range(2, 4)], residue, 'CA', HBDonorType.AlphaHydrogen)
+                elif 'HA1' in residue and 'HA2' in residue:
+                    self._add_donor_atoms(self.donors, residue, [f'HA{i}' for i in range(1, 3)], residue, 'CA', HBDonorType.AlphaHydrogen)
             else:
                 self._add_donor_atoms(self.donors, residue, 'HA', residue, 'CA', HBDonorType.AlphaHydrogen)
                 
