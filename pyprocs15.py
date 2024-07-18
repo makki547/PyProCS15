@@ -58,7 +58,7 @@ class PyProCS15:
     def load_structure(self, filename):
         
         self.structure = self._get_structure_object(filename)
-        self.hbond_dist_cache = self._Hydrogen_bond_distance_cache()        
+        self.hbond_dist_cache = self._Hydrogen_bond_distance_cache(self.structure)        
         self._prepare()
 
     def _get_structure_object(self, filename):
@@ -123,6 +123,9 @@ class PyProCS15:
                     
                                         
                     residue.hetatm = False
+
+                    for atom in residue:
+                        atom.model_id = model_id
         
         
         #collect molecular properties for chemical shift calculation    
@@ -834,43 +837,51 @@ class PyProCS15:
 
     class _Hydrogen_bond_distance_cache:
 
-        def __init__(self):
-            self.donor_atoms = []
-            self.last_donor_cache_id = -1
+        def __init__(self, structure):
+            self.n_models = len(structure)
+            self.donor_atoms = [[] for i in range(self.n_models)]
+            self.last_donor_cache_id = [-1] * self.n_models
 
-            self.acceptor_atoms = []
-            self.last_acceptor_cache_id = -1
+            self.acceptor_atoms = [[] for i in range(self.n_models)]
+            self.last_acceptor_cache_id = [-1] * self.n_models
 
 
             self.distance_matrix = None
 
         def add_donor_atom(self, donor_atom):
 
-            self.last_donor_cache_id += 1
-            self.donor_atoms.append(donor_atom)
-            donor_atom.donor_distance_cache_id = self.last_donor_cache_id
+            model_id = donor_atom.model_id
+            self.last_donor_cache_id[model_id] += 1
+            self.donor_atoms[model_id].append(donor_atom)
+            donor_atom.donor_distance_cache_id = self.last_donor_cache_id[model_id]
             pass
 
         def add_acceptor_atom(self, acceptor_atom):
 
-            self.last_acceptor_cache_id += 1
-            self.acceptor_atoms.append(acceptor_atom)
-            acceptor_atom.acceptor_distance_cache_id = self.last_acceptor_cache_id
+            model_id = acceptor_atom.model_id
+            self.last_acceptor_cache_id[model_id] += 1
+            self.acceptor_atoms[model_id].append(acceptor_atom)
+            acceptor_atom.acceptor_distance_cache_id = self.last_acceptor_cache_id[model_id]
             pass
 
         def generate_distance_cache(self):
 
-            donor_coords = np.array([atom.get_coord() for atom in self.donor_atoms])
-            acceptor_coords = np.array([atom.get_coord() for atom in self.acceptor_atoms])
+            self.distance_matrix = []
+            for i in range(self.n_models):
+                donor_coords = np.array([atom.get_coord() for atom in self.donor_atoms[i]])
+                acceptor_coords = np.array([atom.get_coord() for atom in self.acceptor_atoms[i]])
 
-            self.distance_matrix = cdist(donor_coords, acceptor_coords, metric = 'euclidean')
+                self.distance_matrix.append(cdist(donor_coords, acceptor_coords, metric = 'euclidean'))
 
         def get_distance(self, donor_atom, acceptor_atom):
 
             if self.distance_matrix is None:
                 self.generate_distance_cache()
+
+            if donor_atom.model_id != acceptor_atom.model_id:
+                return 1.0E+6
             
-            return self.distance_matrix[donor_atom.donor_distance_cache_id, acceptor_atom.acceptor_distance_cache_id]
+            return self.distance_matrix[donor_atom.model_id][donor_atom.donor_distance_cache_id, acceptor_atom.acceptor_distance_cache_id]
 
 
 
@@ -915,7 +926,7 @@ class ProCS15ParameterFileException(Exception):
 
 if __name__ == '__main__':
     
-    pyprocs15 = PyProCS15('1UBQ_amber.pdb')
+    pyprocs15 = PyProCS15('2lj5_2.pdb')
     shieldings = pyprocs15.calc_shieldings()
     print(shieldings)
     
