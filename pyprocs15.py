@@ -290,14 +290,14 @@ class PyProCS15:
         HBOND_R_DELTA = 0.01
         HBOND_TETHA_MIN = 90.0
         HBOND_TETHA_DELTA = 1.0
-        HBOND_RHO_MIN = 0.0
+        HBOND_RHO_MIN = -180.0
         HBOND_RHO_DELTA = 1.0
 
         HABOND_R_MIN = 1.8
         HABOND_R_DELTA = 0.01
         HABOND_TETHA_MIN = 90.0
         HABOND_TETHA_DELTA = 1.0
-        HABOND_RHO_MIN = 0.0
+        HABOND_RHO_MIN = -180.0
         HABOND_RHO_DELTA = 1.0
         
         
