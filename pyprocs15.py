@@ -1,4 +1,5 @@
 import sys
+import warnings
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import cdist
@@ -146,8 +147,8 @@ class PyProCS15:
                     try:
                         residue.dihedral_contribution.calc_dihedral_angles()    
                     except AtomMissingException:
-                        print(f'Atom not found in {resid}-th residue, this and the adjacent residues will be ignored', file = sys.stderr)
-                    
+                        #print(f'Atom not found in {resid}-th residue, this and the adjacent residues will be ignored', file = sys.stderr)
+                        warnings.warn(f'Atom not found in {resid}-th residue, this and the adjacent residues will be ignored', UserWarning)
                     
                     residue.hydrogen_bonds = self._Hydrogen_bond(residue, self.hbond_dist_cache)
            
@@ -238,7 +239,8 @@ class PyProCS15:
                 contribs[i,4,:] = ha_hb_secondary_contrib
                 contribs[i,5,:] = ring_current_contrib
             except AtomMissingException as e:
-                print(e, file=sys.stderr)
+                warnings.warn(e, UserWarning)
+                # print(e, file=sys.stderr)
             except Exception as e:
                 raise e
 
@@ -632,7 +634,8 @@ class PyProCS15:
                     destination.append( (first_residue[first_atom_names], second_residue[second_atom_names], hb_type) )
                     
             except KeyError:
-                print(f'!!Warning!! Hydrogen not found, {first_residue} {second_residue}', file = sys.stderr)
+                warnings.warn(f'Hydrogen bond donor proton was not found, {first_residue} {second_residue}', UserWarning)
+                #print(f'!!Warning!! Hydrogen not found, {first_residue} {second_residue}', file = sys.stderr)
             except Exception as e:
                 raise e
             
@@ -647,7 +650,8 @@ class PyProCS15:
                     destination.append( (first_residue[first_atom_names], second_residue[second_atom_names], third_residue[third_atom_names], hb_type) )
                     
             except KeyError:
-                print('!!Warning!! Oxygen not found', file = sys.stderr)
+                #print('!!Warning!! Oxygen not found', file = sys.stderr)
+                warnings.warn(f'Hydrogen bond donor atoms were not found, {first_residue}, {second_residue}', UserWarning)
             except Exception as e:
                 raise e
             
@@ -665,7 +669,8 @@ class PyProCS15:
                 elif 'HN' in residue:
                     self._add_donor_atoms(self.donors, residue, 'HN', residue, 'N', HBDonorType.Amide)
                 else:
-                    print(f'!!Warning!! Hydrogen not found, {first_residue} {second_residue}', file = sys.stderr)
+                    #print(f'!!Warning!! Hydrogen not found, {residue} ', file = sys.stderr)
+                    warnings.warn(f'Amide hydrogen was not found, {residue} ', UserWarning)
                 
             if resname == 'GLY':
                 if 'HA2' in residue and 'HA3' in residue:
@@ -705,7 +710,13 @@ class PyProCS15:
                     self._add_acceptor_atoms(self.acceptors, residue, 'O', residue, 'C', residue.next, 'N', HBAcceptorType.Amide)
                     
             if resname == 'SER':
-                self._add_acceptor_atoms(self.acceptors, residue, 'OG', residue, 'CB', residue, 'HG', HBAcceptorType.Alcohol)
+                if 'HG' in residue:
+                    self._add_acceptor_atoms(self.acceptors, residue, 'OG', residue, 'CB', residue, 'HG', HBAcceptorType.Alcohol)
+                elif 'HG1' in residue:
+                    self._add_acceptor_atoms(self.acceptors, residue, 'OG', residue, 'CB', residue, 'HG1', HBAcceptorType.Alcohol)
+                else:
+                    warnings.warn(f'Alchol Hydrogen was not found, {residue} ', UserWarning)
+                    #print(f'!!Warning!! Hydrogen not found, {residue}', file = sys.stderr)
             elif resname == 'THR': 
                 self._add_acceptor_atoms(self.acceptors, residue, 'OG1', residue, 'CB', residue, 'HG1', HBAcceptorType.Alcohol)
             elif resname == 'TYR':
