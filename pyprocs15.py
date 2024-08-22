@@ -657,10 +657,15 @@ class PyProCS15:
             
             if 'H1' in residue:
                 self._add_donor_atoms(self.donors, residue, [f'H{i}' for i in range(1, 4)], residue, 'N', HBDonorType.Ammonium)
-            if 'HT1' in residue:
+            elif 'HT1' in residue:
                 self._add_donor_atoms(self.donors, residue, [f'HT{i}' for i in range(1, 4)], residue, 'N', HBDonorType.Ammonium)
             elif resname != 'PRO':
-                self._add_donor_atoms(self.donors, residue, 'H', residue, 'N', HBDonorType.Amide)
+                if 'H' in residue:
+                    self._add_donor_atoms(self.donors, residue, 'H', residue, 'N', HBDonorType.Amide)
+                elif 'HN' in residue:
+                    self._add_donor_atoms(self.donors, residue, 'HN', residue, 'N', HBDonorType.Amide)
+                else:
+                    print(f'!!Warning!! Hydrogen not found, {first_residue} {second_residue}', file = sys.stderr)
                 
             if resname == 'GLY':
                 if 'HA2' in residue and 'HA3' in residue:
