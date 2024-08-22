@@ -103,7 +103,7 @@ class PyProCS15:
                     
                     resname = residue.get_resname()
                     
-                    if resname == 'HID' or resname == 'HIE':
+                    if resname == 'HID' or resname == 'HIE' or resname == 'HSD' or resname == 'HSE' or resname == 'HSP':
                         residue.resname = resname = 'HIS'
                         
                     
@@ -657,6 +657,8 @@ class PyProCS15:
             
             if 'H1' in residue:
                 self._add_donor_atoms(self.donors, residue, [f'H{i}' for i in range(1, 4)], residue, 'N', HBDonorType.Ammonium)
+            if 'HT1' in residue:
+                self._add_donor_atoms(self.donors, residue, [f'HT{i}' for i in range(1, 4)], residue, 'N', HBDonorType.Ammonium)
             elif resname != 'PRO':
                 self._add_donor_atoms(self.donors, residue, 'H', residue, 'N', HBDonorType.Amide)
                 
@@ -691,6 +693,8 @@ class PyProCS15:
             
             if 'OXT' in residue:
                 self._add_acceptor_atoms(self.acceptors, residue, ['O', 'OXT'], residue, 'C', residue, ['OXT', 'O'], HBAcceptorType.Carboxylate)
+            elif 'OT1' in residue:
+                self._add_acceptor_atoms(self.acceptors, residue, ['OT1', 'OT2'], residue, 'C', residue, ['OT2', 'OT1'], HBAcceptorType.Carboxylate)
             else:
                 if residue.next is not None:
                     self._add_acceptor_atoms(self.acceptors, residue, 'O', residue, 'C', residue.next, 'N', HBAcceptorType.Amide)
@@ -741,6 +745,8 @@ class PyProCS15:
                     for acceptor in counter_residue.hydrogen_bonds.acceptors:
 
                         dist = dist_cache.get_distance(donor[0], acceptor[0])
+                        
+                        
 
                         if donor[2] == HBDonorType.AlphaHydrogen:
                             dist_max = dataset.HABOND_R_MAX
@@ -758,9 +764,9 @@ class PyProCS15:
                         v2 = acceptor[0].get_vector()
                         v3 = acceptor[1].get_vector()
                         v4 = acceptor[2].get_vector()
-    
-
+                        
                         theta = np.rad2deg( Bio.PDB.vectors.calc_angle(v1, v2, v3) )
+                        
                         rho = np.rad2deg( Bio.PDB.vectors.calc_dihedral(v1, v2, v3, v4) )
 
                         for i,atom in enumerate(atoms):
@@ -799,6 +805,8 @@ class PyProCS15:
 
                     if acceptor[0].get_name() != 'O':
                         continue
+                    
+                    
 
                     v2 = acceptor[0].get_vector()
                     v3 = acceptor[1].get_vector()
@@ -822,7 +830,7 @@ class PyProCS15:
 
                         v1 = donor[0].get_vector()
                         
-
+                        
                         theta = np.rad2deg( Bio.PDB.vectors.calc_angle(v1, v2, v3) )
                         rho = np.rad2deg( Bio.PDB.vectors.calc_dihedral(v1, v2, v3, v4) )
 
